@@ -1,11 +1,13 @@
+import os
+
 from flask import Flask, request
 from flask_migrate import Migrate
 from flask_bcrypt import Bcrypt
 from flask_jwt_extended import (
     JWTManager,
     create_access_token,
+    get_jwt_identity,
     jwt_required,
-    get_jwt_identity
 )
 
 from models import db, User, Note
@@ -18,7 +20,10 @@ app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///app.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 # JWT configuration
-app.config["JWT_SECRET_KEY"] = "super-secret-key-change-this-later"
+app.config["JWT_SECRET_KEY"] = os.environ.get(
+    "JWT_SECRET_KEY",
+    "development-secret-key"
+)
 
 # Initialize extensions
 db.init_app(app)
@@ -27,34 +32,35 @@ bcrypt = Bcrypt(app)
 jwt = JWTManager(app)
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # HOME
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/")
-def index():
+def home():
     return {"message": "Productivity API is running"}
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # SIGNUP
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/signup", methods=["POST"])
 def signup():
     data = request.get_json()
 
     if not data:
-        return {"error": "Request body is required"}, 400
+        return {"error": "Invalid JSON data"}, 400
 
     username = data.get("username")
     password = data.get("password")
     password_confirmation = data.get("password_confirmation")
 
-    if not username or not password or not password_confirmation:
-        return {
-            "error": "Username, password and password confirmation are required"
-        }, 400
+    if not username:
+        return {"error": "Username is required"}, 400
+
+    if not password:
+        return {"error": "Password is required"}, 400
 
     if password != password_confirmation:
         return {"error": "Passwords do not match"}, 400
@@ -85,16 +91,16 @@ def signup():
     }, 201
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # LOGIN
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/login", methods=["POST"])
 def login():
     data = request.get_json()
 
     if not data:
-        return {"error": "Request body is required"}, 400
+        return {"error": "Invalid JSON data"}, 400
 
     username = data.get("username")
     password = data.get("password")
@@ -123,16 +129,16 @@ def login():
     }, 200
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # CURRENT USER
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/me", methods=["GET"])
 @jwt_required()
 def me():
-    current_user_id = get_jwt_identity()
+    current_user_id = int(get_jwt_identity())
 
-    user = db.session.get(User, int(current_user_id))
+    user = db.session.get(User, current_user_id)
 
     if not user:
         return {"error": "User not found"}, 404
@@ -143,9 +149,10 @@ def me():
     }, 200
 
 
-# ---------------------------------------------------
-# GET ALL NOTES - PAGINATED
-# ---------------------------------------------------
+# --------------------------------------------------
+# GET ALL NOTES
+# PAGINATION
+# --------------------------------------------------
 
 @app.route("/notes", methods=["GET"])
 @jwt_required()
@@ -161,25 +168,26 @@ def get_notes():
     if per_page < 1:
         per_page = 10
 
-    pagination = (
-        Note.query
-        .filter_by(user_id=current_user_id)
-        .paginate(
-            page=page,
-            per_page=per_page,
-            error_out=False
-        )
+    if per_page > 100:
+        per_page = 100
+
+    pagination = Note.query.filter_by(
+        user_id=current_user_id
+    ).paginate(
+        page=page,
+        per_page=per_page,
+        error_out=False
     )
 
-    notes = []
-
-    for note in pagination.items:
-        notes.append({
+    notes = [
+        {
             "id": note.id,
             "title": note.title,
             "content": note.content,
             "user_id": note.user_id
-        })
+        }
+        for note in pagination.items
+    ]
 
     return {
         "notes": notes,
@@ -192,9 +200,9 @@ def get_notes():
     }, 200
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # GET ONE NOTE
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/notes/<int:note_id>", methods=["GET"])
 @jwt_required()
@@ -217,9 +225,9 @@ def get_note(note_id):
     }, 200
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # CREATE NOTE
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/notes", methods=["POST"])
 @jwt_required()
@@ -229,19 +237,20 @@ def create_note():
     data = request.get_json()
 
     if not data:
-        return {"error": "Request body is required"}, 400
+        return {"error": "Invalid JSON data"}, 400
 
     title = data.get("title")
     content = data.get("content")
 
-    if not title or not content:
-        return {
-            "error": "Title and content are required"
-        }, 400
+    if not isinstance(title, str) or not title.strip():
+        return {"error": "Title is required"}, 400
+
+    if not isinstance(content, str) or not content.strip():
+        return {"error": "Content is required"}, 400
 
     note = Note(
-        title=title,
-        content=content,
+        title=title.strip(),
+        content=content.strip(),
         user_id=current_user_id
     )
 
@@ -256,9 +265,9 @@ def create_note():
     }, 201
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # UPDATE NOTE
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/notes/<int:note_id>", methods=["PATCH"])
 @jwt_required()
@@ -276,13 +285,23 @@ def update_note(note_id):
     data = request.get_json()
 
     if not data:
-        return {"error": "Request body is required"}, 400
+        return {"error": "Invalid JSON data"}, 400
 
     if "title" in data:
-        note.title = data["title"]
+        title = data["title"]
+
+        if not isinstance(title, str) or not title.strip():
+            return {"error": "Title cannot be empty"}, 400
+
+        note.title = title.strip()
 
     if "content" in data:
-        note.content = data["content"]
+        content = data["content"]
+
+        if not isinstance(content, str) or not content.strip():
+            return {"error": "Content cannot be empty"}, 400
+
+        note.content = content.strip()
 
     db.session.commit()
 
@@ -294,9 +313,9 @@ def update_note(note_id):
     }, 200
 
 
-# ---------------------------------------------------
+# --------------------------------------------------
 # DELETE NOTE
-# ---------------------------------------------------
+# --------------------------------------------------
 
 @app.route("/notes/<int:note_id>", methods=["DELETE"])
 @jwt_required()
@@ -314,8 +333,12 @@ def delete_note(note_id):
     db.session.delete(note)
     db.session.commit()
 
-    return {}, 204
+    return "", 204
 
+
+# --------------------------------------------------
+# RUN APPLICATION
+# --------------------------------------------------
 
 if __name__ == "__main__":
-    app.run(port=5555, debug=True)
+    app.run(port=5000, debug=True)
