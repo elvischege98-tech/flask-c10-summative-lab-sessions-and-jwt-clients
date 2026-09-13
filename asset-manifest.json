@@ -1,0 +1,10 @@
+{
+  "files": {
+    "main.js": "/flask-c10-summative-lab-sessions-and-jwt-clients/static/js/main.4ef46c42.js",
+    "index.html": "/flask-c10-summative-lab-sessions-and-jwt-clients/index.html",
+    "main.4ef46c42.js.map": "/flask-c10-summative-lab-sessions-and-jwt-clients/static/js/main.4ef46c42.js.map"
+  },
+  "entrypoints": [
+    "static/js/main.4ef46c42.js"
+  ]
+}
